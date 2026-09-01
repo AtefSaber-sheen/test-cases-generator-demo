@@ -1,0 +1,31 @@
+// Miniature stand-in for a Prisma schema, used by examples/checkout.
+// The persisted data contracts and the uniqueness/referential test cases cite these lines.
+
+model Order {
+  id         String      @id @default(uuid())
+  customerId String
+  cartId     String      @unique
+  discount   Decimal     @default(0)
+  total      Decimal
+  status     OrderStatus @default(pending)
+  createdAt  DateTime    @default(now())
+
+  redemptions Redemption[]
+}
+
+enum OrderStatus {
+  pending
+  paid
+  shipped
+  cancelled
+}
+
+model Redemption {
+  id          String @id @default(uuid())
+  promotionId String
+  customerId  String
+  orderId     String
+  order       Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, customerId])
+}

@@ -1,0 +1,50 @@
+{
+  "name": "test-cases-generator-from-codebases",
+  "version": "1.0.0",
+  "description": "Claude Code skill package that derives a fully-traceable, execution-ready test suite from static investigation of a codebase alone - no running application, no API access, no UI access. One run produces exactly two files: a CSV of test cases with full procedures, and a Markdown report holding coverage, gaps, assumptions and traceability. A scope narrower than the whole repo is a seed, not a filter: the dependency closure of what it calls is covered too, and unreadable dependencies become boundary surfaces with named failure modes.",
+  "license": "MIT",
+  "author": "AtefSaber-sheen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtefSaber-sheen/test-cases-generator-from-codebases.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "type": "commonjs",
+  "bin": {
+    "testgen-scan": "tools/recon_scan/cli.js",
+    "testgen-depgraph": "tools/depgraph/cli.js"
+  },
+  "files": [
+    ".claude/",
+    "tools/",
+    "docs/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node tools/run-tests.js",
+    "scan": "node tools/recon_scan/cli.js",
+    "depgraph": "node tools/depgraph/cli.js"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-skill",
+    "agent-skill",
+    "test-generation",
+    "static-analysis",
+    "test-cases",
+    "test-design",
+    "qa",
+    "traceability",
+    "agentic-testing",
+    "test-automation",
+    "dependency-graph",
+    "call-graph",
+    "execution-coverage",
+    "blast-radius",
+    "csv"
+  ],
+  "dependencies": {},
+  "devDependencies": {}
+}

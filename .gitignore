@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# Generated analysis output for a target repo lives here by default.
+# Deliberately NOT ignored wholesale — a team may want to commit the suite for
+# a project. Only the volatile parts are ignored.
+testgen_out/**/*.tmp
+testgen_out/**/.cache/

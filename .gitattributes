@@ -1,0 +1,8 @@
+# Normalize text to LF in the repository. Both parsers read CRLF and LF identically, so a Windows
+# working copy is fine — but the stored form must be one thing, or every cross-platform commit is a
+# whole-file diff.
+* text=auto
+
+# Generated workbooks are ZIP containers. Line-ending conversion would corrupt them outright, and
+# would break the byte-reproducibility check CI runs against the committed example.
+*.xlsx binary
