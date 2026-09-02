@@ -4,8 +4,8 @@ A miniature source tree, small enough to read in one sitting, for running the wh
 
 ```bash
 # from the repository root
-node tools/recon_scan/cli.js --repo examples/app
-node tools/depgraph/cli.js   --repo examples/app --scope src/checkout
+node test-cases-generator-demo-tools/recon_scan/cli.js --repo examples/app
+node test-cases-generator-demo-tools/depgraph/cli.js   --repo examples/app --scope src/checkout
 ```
 
 Then, in Claude Code:

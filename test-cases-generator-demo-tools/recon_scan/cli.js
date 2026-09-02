@@ -18,7 +18,7 @@ const USAGE = `
 testgen-scan — static inventory of a codebase, for test design
 
 USAGE
-  node tools/recon_scan/cli.js --repo <path> [options]
+  node test-cases-generator-demo-tools/recon_scan/cli.js --repo <path> [options]
 
 OPTIONS
   --repo <path>          Repository to scan (default: current directory)

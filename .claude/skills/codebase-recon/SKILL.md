@@ -22,12 +22,12 @@ outputs:
     description: Everything the source could not settle - with the assumption taken, if any. HELD IN CONTEXT. Rendered into the Stage 4 report's Gaps and assumptions section.
   - name: dependency_closure
     type: in_context
-    description: Output of `tools/depgraph` - the files the scope transitively executes, the internal call graph with call-site lines, the unreadable dependencies reached (each an `EXT` surface with its failure modes), the callers impacted by a change, and every edge that could not be resolved. HELD IN CONTEXT. Rendered into the Stage 4 report's Execution closure and boundaries section.
+    description: Output of `test-cases-generator-demo-tools/depgraph` - the files the scope transitively executes, the internal call graph with call-site lines, the unreadable dependencies reached (each an `EXT` surface with its failure modes), the callers impacted by a change, and every edge that could not be resolved. HELD IN CONTEXT. Rendered into the Stage 4 report's Execution closure and boundaries section.
   - name: recon_scan
     type: in_context
-    description: Output of `tools/recon_scan` - the candidate list this stage confirmed or rejected. Read from the tool's stdout; kept in context so the report can state what was searched.
+    description: Output of `test-cases-generator-demo-tools/recon_scan` - the candidate list this stage confirmed or rejected. Read from the tool's stdout; kept in context so the report can state what was searched.
 dependencies:
-  - Node.js >= 18 (for tools/recon_scan and tools/depgraph)
+  - Node.js >= 18 (for test-cases-generator-demo-tools/recon_scan and test-cases-generator-demo-tools/depgraph)
   - Read / Grep / Glob file tools (or their lean-ctx equivalents)
 ---
 
@@ -94,7 +94,7 @@ So the categories are these, and they are treated differently:
 ### Run the closure first, before confirming any candidate
 
 ```bash
-node tools/depgraph/cli.js --repo <REPO> --scope src/checkout
+node test-cases-generator-demo-tools/depgraph/cli.js --repo <REPO> --scope src/checkout
 ```
 
 
@@ -152,7 +152,7 @@ A **testable surface** is any boundary at which the system accepts input, produc
 `EXT` is the kind a scope-filtered run never produces, and it is where a sub-scope suite gains most
 of its real coverage. One row per unreadable dependency, addressed at its **call sites** rather than
 at the package: a test drives the caller and controls the dependency, so the call-site line is the
-entry point and `Outputs` enumerates the failure modes the boundary can produce. `tools/depgraph`
+entry point and `Outputs` enumerates the failure modes the boundary can produce. `test-cases-generator-demo-tools/depgraph`
 supplies both — take the role, the failure-mode list and the isolation level from the dependency-closure data
 rather than inventing them.
 
@@ -169,7 +169,7 @@ Run the phases in order. Each ends with a written artifact; nothing is held only
 **First, the surface sweep:**
 
 ```bash
-node tools/recon_scan/cli.js --repo <REPO>
+node test-cases-generator-demo-tools/recon_scan/cli.js --repo <REPO>
 ```
 
 This prints the scan to stdout: the file census, the manifest-derived stack, inferred module boundaries, existing tests, schema sources, and **candidate** surfaces with `path:line`. Add `--json` for the full structured report.
@@ -184,7 +184,7 @@ and useful even for a full-repo run because it produces the `EXT` boundary list 
 call graph:
 
 ```bash
-node tools/depgraph/cli.js --repo <REPO> --scope <scope>
+node test-cases-generator-demo-tools/depgraph/cli.js --repo <REPO> --scope <scope>
 ```
 
 This prints the closure to stdout; add `--json` for the structured report. Read its **What Stage 1 must inventory**
@@ -362,7 +362,7 @@ Stage 2 may begin when all of the following are true. State them explicitly at t
 
 # 11. Allowed tools
 
-Read, Grep/search, Glob, and `node tools/recon_scan/cli.js`. Git history is readable for context (`git log`, `git blame`) — it is source, not observation.
+Read, Grep/search, Glob, and `node test-cases-generator-demo-tools/recon_scan/cli.js`. Git history is readable for context (`git log`, `git blame`) — it is source, not observation.
 
 **Not allowed:** running the application, executing its test suite, any network call, any browser, any write to the target repository.
 

@@ -86,7 +86,7 @@ coverage report says 100%, and the regression ships in the layer below.
 So the closure is walked first:
 
 ```bash
-node tools/depgraph/cli.js --repo ../my-app --scope src/checkout
+node test-cases-generator-demo-tools/depgraph/cli.js --repo ../my-app --scope src/checkout
 ```
 
 | What is found | How it is treated |
@@ -165,8 +165,8 @@ Stages 1-3 hand their findings forward in context; Stage 4 is the only one that 
 
 ```bash
 # Stage 1 - mechanical sweep first, then the skill confirms every candidate
-node tools/recon_scan/cli.js --repo ../my-app
-node tools/depgraph/cli.js   --repo ../my-app --scope src/checkout
+node test-cases-generator-demo-tools/recon_scan/cli.js --repo ../my-app
+node test-cases-generator-demo-tools/depgraph/cli.js   --repo ../my-app --scope src/checkout
 ```
 
 Then, in Claude Code:
@@ -179,8 +179,8 @@ Then behavior-spec, then test-design-from-code, then suite-export to ./out.
 ### Every command
 
 ```bash
-node tools/recon_scan/cli.js --repo <path>                    # static inventory
-node tools/depgraph/cli.js   --repo <path> --scope <subpath>  # dependency closure
+node test-cases-generator-demo-tools/recon_scan/cli.js --repo <path>                    # static inventory
+node test-cases-generator-demo-tools/depgraph/cli.js   --repo <path> --scope <subpath>  # dependency closure
 ```
 
 Both print to stdout. The skills read that output; nothing is saved.
@@ -243,7 +243,7 @@ runner should:
 
 Parse the CSV with a real RFC 4180 parser: the `Steps` cell deliberately holds a multi-line
 procedure, and splitting on newlines corrupts it silently. See
-[`docs/AGENTIC_HANDOFF.md`](docs/AGENTIC_HANDOFF.md).
+[`test-cases-generator-demo-docs/AGENTIC_HANDOFF.md`](test-cases-generator-demo-docs/AGENTIC_HANDOFF.md).
 
 ---
 
@@ -269,10 +269,10 @@ stable precisely so that merge is possible.
 
 ```
 .claude/skills/          the four skills
-tools/recon_scan/        static inventory: stack, surfaces, existing tests, what was NOT searched
-tools/depgraph/          dependency closure: what a scope executes, its boundaries, its blast radius
-docs/WORKFLOW.md         operator guide: what to run, what to read, what to check at each gate
-docs/AGENTIC_HANDOFF.md  how a runner consumes the CSV and the report
+test-cases-generator-demo-tools/recon_scan/        static inventory: stack, surfaces, existing tests, what was NOT searched
+test-cases-generator-demo-tools/depgraph/          dependency closure: what a scope executes, its boundaries, its blast radius
+test-cases-generator-demo-docs/WORKFLOW.md         operator guide: what to run, what to read, what to check at each gate
+test-cases-generator-demo-docs/AGENTIC_HANDOFF.md  how a runner consumes the CSV and the report
 examples/app/            a small worked application to run the pipeline against
 ```
 

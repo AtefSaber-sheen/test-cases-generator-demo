@@ -32,7 +32,7 @@ const USAGE = [
   'testgen-depgraph - what a part of a system actually executes',
   '',
   'USAGE',
-  '  node tools/depgraph/cli.js --repo <path> [--scope <spec>] [options]',
+  '  node test-cases-generator-demo-tools/depgraph/cli.js --repo <path> [--scope <spec>] [options]',
   '',
   'OPTIONS',
   '  --repo <path>       Repository to analyse (default: current directory)',

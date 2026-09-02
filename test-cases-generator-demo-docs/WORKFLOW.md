@@ -40,8 +40,8 @@ too large to review. Never into two files for one run.
 ## Stage 1 - recon
 
 ```bash
-node tools/recon_scan/cli.js --repo ../my-app
-node tools/depgraph/cli.js   --repo ../my-app --scope src/checkout
+node test-cases-generator-demo-tools/recon_scan/cli.js --repo ../my-app
+node test-cases-generator-demo-tools/depgraph/cli.js   --repo ../my-app --scope src/checkout
 ```
 
 Both tools print to stdout; read their output rather than saving it. Then invoke `codebase-recon`.

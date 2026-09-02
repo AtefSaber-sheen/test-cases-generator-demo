@@ -13,19 +13,19 @@
   },
   "type": "commonjs",
   "bin": {
-    "testgen-scan": "tools/recon_scan/cli.js",
-    "testgen-depgraph": "tools/depgraph/cli.js"
+    "testgen-scan": "test-cases-generator-demo-tools/recon_scan/cli.js",
+    "testgen-depgraph": "test-cases-generator-demo-tools/depgraph/cli.js"
   },
   "files": [
     ".claude/",
-    "tools/",
-    "docs/",
+    "test-cases-generator-demo-tools/",
+    "test-cases-generator-demo-docs/",
     "README.md"
   ],
   "scripts": {
-    "test": "node tools/run-tests.js",
-    "scan": "node tools/recon_scan/cli.js",
-    "depgraph": "node tools/depgraph/cli.js"
+    "test": "node test-cases-generator-demo-tools/run-tests.js",
+    "scan": "node test-cases-generator-demo-tools/recon_scan/cli.js",
+    "depgraph": "node test-cases-generator-demo-tools/depgraph/cli.js"
   },
   "keywords": [
     "claude-code",
