@@ -34,7 +34,7 @@ function findTestFiles(dir, found = []) {
   return found;
 }
 
-const files = findTestFiles(path.join(ROOT, 'tools')).sort();
+const files = findTestFiles(path.join(ROOT, 'test-cases-generator-demo-tools')).sort();
 
 if (files.length < MINIMUM_TEST_FILES) {
   process.stderr.write(

@@ -19,7 +19,7 @@
 // dropped. They are classified `unresolved` and surface as gaps, so an incomplete graph reports
 // itself instead of reading as complete.
 //
-// Adding a language means adding a row here. No other file in tools/depgraph changes.
+// Adding a language means adding a row here. No other file in test-cases-generator-demo-tools/depgraph changes.
 
 'use strict';
 
