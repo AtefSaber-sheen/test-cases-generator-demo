@@ -98,15 +98,23 @@ findings worth more than a test QA cannot run) · the **`Isolation`** column (if
 **assumption-derived cases**, the ones most likely to fail against correct code.
 
 **Gate:** every case has the twelve fields, a valid layer, a module, a traceability row with
-`path:line`, and a recognised isolation value. Stage 4 checks all of this and reports what fails.
+`path:line`, a recognised isolation value, and a provenance row - a `Source` matching its traceability
+evidence and a `Reason for Extraction` naming the rule, boundary, mode, contract or journey behind it.
+The run provenance (Claude model, effort level, verbatim user prompt) is recorded once, as observed.
+Stage 4 checks all of this and reports what fails.
 
 ## Stage 4 - write the two files
 
-Invoke `suite-export`. It runs its twelve checks, then writes `TestCases_<Scope>.csv` (RFC 4180,
+Invoke `suite-export`. It runs its seventeen checks, then writes `TestCases_<Scope>.csv` (RFC 4180,
 quoted multi-line cells) and `TestReport_<Scope>.md` (fourteen fixed sections).
 
 **Read the Warnings section first** - the last section, where every failed check lands naming the
 case and the field. A clean run says `None - every case passed every check.`
+
+Each CSV row also carries its own provenance: `Source` and `Reason for Extraction` say where that case
+came from, and `Claude Model`, `Effort Level` and `User Prompt` say which run wrote it - the same three
+on every row, and repeated in the report Summary so the pair is self-describing. That is what lets a
+row survive being filtered out of the file it was born in and still be traced back.
 
 **The review loop.** `Review` and `Automation` ship as `Pending` on every row - no skill writes any
 other value, because a suite that advances its own review status has reviewed its own work. A

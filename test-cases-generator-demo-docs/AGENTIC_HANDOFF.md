@@ -7,7 +7,7 @@ A run produces two files, joined on **Test Case ID**, which is stable across re-
 
 | File | For the runner |
 |---|---|
-| `TestCases_<Scope>.csv` | The cases. One row each, with the full procedure, the layer, the entry point and the oracle. |
+| `TestCases_<Scope>.csv` | The cases. One row each, with the full procedure, the layer, the entry point, the oracle, and the provenance: `Source`, `Reason for Extraction`, `Claude Model`, `Effort Level`, `User Prompt`. |
 | `TestReport_<Scope>.md` | The execution profile (fixtures, teardown, isolation, determinism), the parallel plan, the test data, and the traceability back to the code. |
 
 Read the CSV for what to run and the report's Execution profile and Parallel plan sections for how
@@ -80,7 +80,16 @@ rather than improvising a value.
 and the coverage sections, so a reader can go from a red result to the `path:line` the case was
 derived from in one step.
 
-**7. Respect non-determinism.** A case marked `Deterministic: No` has its reason in Automation Notes
+**7. Carry the provenance through, do not act on it.** Every row states where the case came from -
+`Source` its `path:line` (or `Assumption: <gap ID>`), `Reason for Extraction` what made it necessary -
+and which run produced it: `Claude Model`, `Effort Level`, `User Prompt`. Echo all five in your result
+record so a red case leads straight back to the code and to the run that wrote it. **These are
+metadata, never inputs to scheduling or gating**: a case is not lower priority because it came from an
+assumption, and re-generating with a different model or effort level does not retire it. A row whose
+`Source` is blank, or whose provenance differs from the rest of the file, means rows from separate
+runs were merged - report it rather than reconciling it yourself.
+
+**8. Respect non-determinism.** A case marked `Deterministic: No` has its reason in Automation Notes
 - real time, an external sandbox, randomness. **Do not retry it until it goes green.** A retry loop
 over a non-deterministic case converts a real signal into noise, and the reason column already says
 why the case cannot be trusted to repeat.
@@ -95,3 +104,4 @@ why the case cannot be trusted to repeat.
 | Retrying a `Deterministic: No` case until green | Converts the one honest signal the suite gave you into noise. |
 | Dropping excluded cases from the totals | Manufactures a pass rate nobody earned. |
 | Editing the CSV and expecting it to survive | It is generated. Re-running Stage 4 overwrites it. |
+| Gating or deprioritizing on `Source`, `Claude Model` or `Effort Level` | Provenance says where a case came from, not how much it is worth. An assumption-derived case tests a real rule. |

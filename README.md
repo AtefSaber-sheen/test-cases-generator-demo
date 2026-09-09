@@ -33,7 +33,7 @@ files: a tester filters one file, and every total is a real total.
 
 | File | For |
 |---|---|
-| `TestCases_{Scope}.csv` | The deliverable. **Every case in the scope, one row each**, with the full numbered procedure, preconditions, concrete test data, expected result, priority, tags, layer, entry point and oracle. RFC 4180, opens clean in Excel, Sheets and LibreOffice. |
+| `TestCases_{Scope}.csv` | The deliverable. **Every case in the scope, one row each**, with the full numbered procedure, preconditions, concrete test data, expected result, priority, tags, layer, entry point, oracle, and the provenance of the case - its `path:line` source, why it was extracted, and the Claude model, effort level and user prompt of the run that produced it. RFC 4180, opens clean in Excel, Sheets and LibreOffice. |
 | `TestReport_{Scope}.md` | Everything behind the cases, in fourteen fixed sections: coverage against **two denominators**, the surface x test-type and flow x journey-type evaluation grids, the execution closure and its boundaries, unreachable-black-box findings, the traceability matrix with `path:line`, the test data, the execution profile, the parallel plan, the specification extract, every gap and the assumption taken, and the warning list. |
 
 Stages 1-3 produce a great deal more - surface inventory, use case catalogue, business rules, data
@@ -144,7 +144,7 @@ number hides exactly that.
 | 1 | **`codebase-recon`** | *What is here, and where exactly?* Stack, module partition, and an exhaustive inventory of testable surfaces - API, UI, jobs, messaging, CLI, data, auth, config - each with `path:line` |
 | 2 | **`behavior-spec`** | *What does it do?* Use cases, business rules, data contracts, state machines, authorization boundaries, error behaviour, config dependence. Every claim cites the line that proves it, with a Confirmed / Inferred / Assumed confidence |
 | 3 | **`test-design-from-code`** | *How is it tested?* The full suite in one scope-wide set. Every test type evaluated against every surface, every journey type against every flow, boundary values derived mechanically from the code's own constraints, plus execution profile and traceability. Black-box layers only |
-| 4 | **`suite-export`** | *Where is the deliverable?* The two files - the CSV of cases and the report - after twelve checks over every case |
+| 4 | **`suite-export`** | *Where is the deliverable?* The two files - the CSV of cases and the report - after seventeen checks over every case |
 
 Stages 1-3 hand their findings forward in context; Stage 4 is the only one that writes.
 
@@ -239,7 +239,7 @@ examples/app/                                      a small worked application to
 - **A boundary failure mode is an input, not a prediction.** The mode list says what a payment gateway
   or database driver can do; what your caller does about each is read from your code, and where it
   does nothing that absence is recorded as the finding.
-- **The checks are enforced by the skill, not by a parser.** Stage 4 runs twelve checks over every
+- **The checks are enforced by the skill, not by a parser.** Stage 4 runs seventeen checks over every
   case and reports each failure in the report's Warnings section. That is an instruction followed by a
   model rather than a program - read the Warnings section rather than assuming it is empty.
 
