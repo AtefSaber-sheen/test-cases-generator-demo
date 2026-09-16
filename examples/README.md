@@ -1,4 +1,4 @@
-﻿# Worked example - Checkout
+# Worked example - Checkout
 
 A miniature source tree, small enough to read in one sitting, for running the whole pipeline against.
 
