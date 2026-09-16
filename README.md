@@ -16,6 +16,55 @@ fabrication, however plausible it reads - and the report says so rather than shi
 
 ---
 
+## Running it from CI
+
+This repository also *hosts* the pipeline. `.github/workflows/generate-tests.yml` runs here
+for every engineer and every codebase; the codebases themselves carry no workflow, no skills
+and no secrets.
+
+A run checks the requested codebase out into `codebase/`, installs the skills and CLIs from
+this repo into it, runs Claude Code headlessly against it, and uploads the two deliverables
+plus the run logs as an artifact that expires on its own `retention-days` clock.
+
+### Supported codebases
+
+[`supported-repos.json`](supported-repos.json) is the roster of codebases a run may analyze:
+
+```json
+{
+  "version": 1,
+  "repositories": [
+    {
+      "fullName": "AtefSaber-sheen/codebase-demo-QuizHut-for-test-cases-generator",
+      "displayName": "QuizHut Demo",
+      "defaultBranch": "main"
+    }
+  ]
+}
+```
+
+Adding a codebase is an edit to this one file: the desktop app fills its dropdown from it,
+and the workflow rejects any `target_repo` it does not list. That validation is not a
+formality - the checkout token can read more than the supported set, so without it a
+hand-crafted dispatch could pull an unrelated private repository into a run and publish it
+as an artifact.
+
+This replaced an arrangement in which the workflow was copied into every codebase
+repository, where onboarding a codebase meant a pull request against it and any change to
+the workflow had to be replayed across all of them.
+
+### Secrets
+
+| Secret | Purpose |
+|---|---|
+| `<ACCOUNT>_CLAUDE_CODE_OAUTH_TOKEN` | One per engineer, named after their Claude account email (uppercased, non-alphanumerics folded to `_`). The desktop app creates it. Each run reads only the one belonging to the engineer who started it. |
+| `CODEBASE_ACCESS_TOKEN` | A PAT that can read every codebase in the manifest. The default `GITHUB_TOKEN` is scoped to this repository alone and cannot reach them. |
+
+There is deliberately no shared fallback token: a fallback would silently run - and bill -
+as whoever owns it rather than as the engineer who started the run.
+
+---
+
 ## Why this exists
 
 The usual way to write tests for an unfamiliar system is to run it and poke at it. That needs a

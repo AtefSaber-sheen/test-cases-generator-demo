@@ -1,0 +1,11 @@
+{
+  "$comment": "The single source of truth for which codebases the test-cases generator can run against. The desktop app fills its repository dropdown from this file, and the workflow re-validates every dispatched target_repo against it. Adding a codebase is an edit to this file only - the codebase itself needs no workflow.",
+  "version": 1,
+  "repositories": [
+    {
+      "fullName": "AtefSaber-sheen/codebase-demo-QuizHut-for-test-cases-generator",
+      "displayName": "QuizHut Demo",
+      "defaultBranch": "main"
+    }
+  ]
+}

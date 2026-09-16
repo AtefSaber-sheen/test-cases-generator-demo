@@ -1,0 +1,575 @@
+name: Generate Test Cases with Claude
+
+run-name: "Generate Test Cases: ${{ github.event.inputs.target_repo }}@${{ github.event.inputs.target_ref }} [${{ github.event.inputs.correlation_id || 'auto' }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Prompt describing how the test-cases-generator-tool and Claude should analyze the codebase'
+        required: true
+        type: string
+      correlation_id:
+        description: 'Client-supplied ID used to identify and poll this specific run'
+        required: true
+        type: string
+      target_repo:
+        description: 'owner/repo of the codebase to analyze. Must be listed in supported-repos.json.'
+        required: true
+        type: string
+      target_ref:
+        description: 'Branch, tag or SHA of target_repo to analyze'
+        required: true
+        type: string
+      model:
+        description: 'Claude model to run with (alias like sonnet, opus, fable, or a full model name)'
+        required: false
+        type: string
+        default: 'sonnet'
+      account_name:
+        description: 'Email of the Claude account whose setup token this run must use (e.g. "atef.saber@tildetech.ae")'
+        required: true
+        type: string
+      secret_name:
+        description: 'Name of the repository secret holding that account''s setup token (e.g. ATEF_SABER_TILDETECH_AE_CLAUDE_CODE_OAUTH_TOKEN). The desktop app derives this from account_name and creates the secret; leave blank to derive it here.'
+        required: false
+        type: string
+        default: ''
+      retention_days:
+        description: 'Days GitHub keeps this run''s artifact before deleting it automatically'
+        required: false
+        type: string
+        default: '1'
+      effort:
+        description: 'Effort level for the session'
+        required: false
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+        default: 'medium'
+
+# Keyed on the account rather than the repository or branch: each engineer's runs
+# queue against their own, so two engineers dispatching at once do not cancel
+# each other. cancel-in-progress stays false - a half-finished run produces no
+# artifact, so cancelling one costs the whole generation.
+#
+# The key stays account-only now that every codebase runs here. Adding the
+# target repo would let one engineer hold several concurrent runs by picking
+# different codebases, and the runs share one Claude account and its rate
+# limit - so the serialisation this provides is per-account by design.
+concurrency:
+  group: generate-tests-${{ github.event.inputs.account_name }}
+  cancel-in-progress: false
+
+jobs:
+  generate-test-cases:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # 0. Checkout this repo - the tool itself. It carries the skills, the CLI
+      #    tools, the operator docs, the run-log generator and the roster of
+      #    codebases this workflow is allowed to analyze.
+      - name: Checkout test-cases-generator-demo
+        uses: actions/checkout@v4
+        with:
+          path: agent-tool
+
+      # 0b. Validate the requested codebase against supported-repos.json.
+      #
+      #     The roster lives here, in the same repo as the workflow, so adding a
+      #     codebase is one edit in one place. Previously the workflow was copied
+      #     into every codebase repo, and a change to it had to be replayed across
+      #     all of them; a repo that missed the update silently ran a stale
+      #     pipeline. Now the codebases carry nothing at all.
+      #
+      #     Validating here rather than trusting the dispatch input matters
+      #     because the checkout below uses a token that can read more than the
+      #     supported set: without this gate, a hand-crafted dispatch could pull
+      #     an arbitrary private repo into a run and ship it out as an artifact.
+      - name: Validate target repository
+        id: target
+        env:
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+          TARGET_REF: ${{ github.event.inputs.target_ref }}
+          CID: ${{ github.event.inputs.correlation_id }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f agent-tool/supported-repos.json ]; then
+            echo "[cid:$CID] ERROR: supported-repos.json is missing from the tool repo."
+            exit 1
+          fi
+
+          if ! printf '%s' "$TARGET_REPO" | grep -qE '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'; then
+            echo "[cid:$CID] ERROR: target_repo '$TARGET_REPO' is not a valid owner/repo."
+            exit 1
+          fi
+
+          if ! jq -e --arg want "$TARGET_REPO"               'any(.repositories[]?; .fullName == $want)'               agent-tool/supported-repos.json > /dev/null; then
+            echo "[cid:$CID] ERROR: '$TARGET_REPO' is not a supported codebase."
+            echo "[cid:$CID] Add it to supported-repos.json in the tool repo to enable it."
+            echo "[cid:$CID] Supported codebases:"
+            jq -r '.repositories[]?.fullName | "  - " + .' agent-tool/supported-repos.json || true
+            exit 1
+          fi
+
+          echo "[cid:$CID] Target '$TARGET_REPO' @ '$TARGET_REF' is supported."
+
+      # 1. Check out the codebase to analyze. This is the per-run copy of the
+      #    engineer's selected branch: it is fetched fresh into codebase/ on
+      #    every run and never committed anywhere, so two engineers analyzing
+      #    different codebases - or different branches of one - cannot collide.
+      #
+      #    CODEBASE_ACCESS_TOKEN is a repository secret holding a PAT that can
+      #    read every codebase in supported-repos.json. The default GITHUB_TOKEN
+      #    is scoped to this repo alone and cannot reach them.
+      - name: Checkout codebase
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.target_repo }}
+          ref: ${{ github.event.inputs.target_ref }}
+          token: ${{ secrets.CODEBASE_ACCESS_TOKEN || github.token }}
+          path: codebase
+
+      # 2b. Install the tool INTO the codebase working directory.
+      #     This step is what makes the pipeline actually run.
+      #
+      #     Claude Code only discovers skills under .claude/skills/ relative
+      #     to its own working directory. Step 7 runs it with `cd codebase`,
+      #     so skills left in agent-tool/ are invisible to it - the prompt
+      #     would claim a pipeline that was never loaded, and Claude would
+      #     improvise a plausible-looking suite instead of running the real
+      #     four stages. Copying the tool's full contents into codebase/
+      #     puts the skills, CLIs and docs exactly where the prompt says
+      #     they are.
+      #
+      #     Copied verbatim from the tool repo, so the skills, output
+      #     templates and CSV/report contracts are the upstream ones - not a
+      #     drifted copy vendored into this repo.
+      - name: Install agent tool into codebase
+        env:
+          CID: ${{ github.event.inputs.correlation_id }}
+        run: |
+          set -euo pipefail
+          echo "[cid:$CID] Installing agentic tool into codebase/..."
+
+          # The four skills - the pipeline itself.
+          mkdir -p codebase/.claude/skills
+          cp -r agent-tool/.claude/skills/. codebase/.claude/skills/
+
+          # The CLI tools (recon_scan, depgraph) and operator docs, at the
+          # exact paths the skills and the prompt reference.
+          cp -r agent-tool/test-cases-generator-demo-tools codebase/
+          cp -r agent-tool/test-cases-generator-demo-docs  codebase/
+
+          echo "[cid:$CID] ---- Installed skills ----"
+          ls -1 codebase/.claude/skills
+
+          # Fail loudly here rather than letting Claude silently improvise
+          # a suite without the pipeline.
+          for skill in codebase-recon behavior-spec test-design-from-code suite-export; do
+            if [ ! -f "codebase/.claude/skills/$skill/SKILL.md" ]; then
+              echo "[cid:$CID] ERROR: missing skill '$skill' (no SKILL.md)."
+              exit 1
+            fi
+          done
+
+          for cli in recon_scan/cli.js depgraph/cli.js; do
+            if [ ! -f "codebase/test-cases-generator-demo-tools/$cli" ]; then
+              echo "[cid:$CID] ERROR: missing tool CLI '$cli'."
+              exit 1
+            fi
+          done
+
+          echo "[cid:$CID] All 4 skills and both CLIs installed."
+
+      # 3. Node is required by the Claude Code CLI and the tool's own CLIs
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 4. Install the Claude Code CLI globally
+      - name: Install Claude Code
+        env:
+          CID: ${{ github.event.inputs.correlation_id }}
+        run: |
+          echo "[cid:$CID] Installing Claude Code CLI..."
+          npm install -g @anthropic-ai/claude-code
+          claude --version || true
+
+      # 5. Build the prompt file.
+      #
+      #    The pipeline contract is ALWAYS prepended, and the caller's prompt
+      #    is appended under it as scope/emphasis. Previously the caller's
+      #    prompt REPLACED these instructions entirely (the pipeline text was
+      #    only the else-branch fallback), so any real dispatch - which always
+      #    supplies a prompt, it is a required input - ran with no pipeline
+      #    instructions at all. That is the difference between running the
+      #    tool and asking Claude to write some test cases.
+      - name: Build prompt
+        env:
+          PROMPT_INPUT: ${{ github.event.inputs.prompt }}
+          CID: ${{ github.event.inputs.correlation_id }}
+          MODEL: ${{ github.event.inputs.model }}
+          EFFORT: ${{ github.event.inputs.effort }}
+        run: |
+          set -euo pipefail
+          echo "[cid:$CID] Building prompt..."
+
+          cat > prompt.txt <<'EOF'
+          You are running the test-cases-generator-demo agentic pipeline against
+          the codebase in the current directory.
+
+          The tool is already installed here:
+            - skills:      .claude/skills/  (codebase-recon, behavior-spec,
+                           test-design-from-code, suite-export)
+            - CLI tools:   test-cases-generator-demo-tools/
+            - operator docs: test-cases-generator-demo-docs/
+                           (WORKFLOW.md, AGENTIC_HANDOFF.md)
+
+          NON-NEGOTIABLE RULES
+
+          1. You MUST run the four skills, in order, by invoking each skill and
+             following its SKILL.md exactly:
+               1. codebase-recon  on . (the current directory)
+               2. behavior-spec
+               3. test-design-from-code
+               4. suite-export, writing to ./out
+
+          2. Run each skill's instructions as written. Do NOT summarize, skip,
+             shortcut or re-invent any stage, and do NOT substitute your own
+             test-writing approach for the skill's method. The output format,
+             the CSV columns, the fourteen report sections and the twelve
+             stage-4 checks are defined by the skills - follow those
+             definitions rather than producing your own layout.
+
+          3. Before stage 1, run the mechanical sweeps and use their output as
+             the candidate set the skill then confirms by opening files:
+               node test-cases-generator-demo-tools/recon_scan/cli.js --repo .
+               node test-cases-generator-demo-tools/depgraph/cli.js   --repo .
+
+          4. Scope is the WHOLE repository unless the scope note below narrows
+             it. A narrower scope is a seed, not a filter: the dependency
+             closure of what it calls is in scope too, and unreadable
+             dependencies become EXT boundary surfaces with named failure
+             modes.
+
+          5. Stages 1-3 write NOTHING to disk - they carry their findings in
+             context. suite-export is the ONLY stage that writes, and it writes
+             exactly two files into ./out:
+               out/TestCases_{Scope}.csv
+               out/TestReport_{Scope}.md
+             Write no other file anywhere.
+
+          6. Every test case must trace to real evidence:
+             source path:line -> Surface -> Use Case / Business Rule -> Test
+             Case -> CSV row. Never invent a case whose chain is broken -
+             record it as a gap in the report instead.
+
+          7. Execution layers are limited to API, UI, E2E and Contract. Do not
+             emit Unit or Component cases. A rule enforced deep in the call
+             graph is pulled up and driven through the surface that reaches it,
+             while still citing the deep path:line as evidence.
+
+          8. Ship Review and Automation as Pending on every row. Never
+             self-approve your own output.
+
+          EOF
+
+          # Append the caller's prompt as scope/emphasis - never as a
+          # replacement for the contract above.
+          if [ -n "${PROMPT_INPUT:-}" ]; then
+            {
+              cat <<'NOTE'
+
+          OPERATOR REQUEST (scope and emphasis for this run).
+          It refines the scope and focus of the pipeline above.
+          It does NOT override the rules above, and does not
+          authorize skipping a stage or changing the deliverables:
+
+          NOTE
+              printf '%s\n' "$PROMPT_INPUT"
+            } >> prompt.txt
+          fi
+
+          # Run provenance. --model and --effort are CLI flags: the session
+          # cannot read either back, so without this block the three
+          # provenance columns have no source and Claude fills them from
+          # the surrounding text - a low-effort run shipped 30 rows
+          # reading "medium". These are the authoritative values, and
+          # they are the same ones handed to the run-log generator.
+          {
+            printf '\n\nRUN PROVENANCE (authoritative - use verbatim).\n'
+            printf 'This block is the ONLY source for the CSV provenance\n'
+            printf 'columns Claude Model, Effort Level and User Prompt,\n'
+            printf 'and for the run-provenance line in the report Summary.\n'
+            printf 'Do not infer them from anything else in this prompt,\n'
+            printf 'do not substitute a model family name, and do not\n'
+            printf 'fall back to a default value:\n\n'
+            printf '  Claude Model: %s\n' "${MODEL:-Unknown}"
+            printf '  Effort Level: %s\n' "${EFFORT:-Unknown}"
+            printf '  User Prompt (verbatim, between the markers):\n'
+            printf '  <<<USER_PROMPT\n'
+            printf '%s\n' "${PROMPT_INPUT:-}"
+            printf 'USER_PROMPT\n'
+          } >> prompt.txt
+
+          echo "[cid:$CID] ---- Prompt used ----"
+          cat prompt.txt
+
+      # 6b. Resolve which Claude setup token this run should use.
+      #
+      #     Every engineer has their own Claude account, so every run must
+      #     authenticate as the engineer who started it. The desktop app
+      #     stores each engineer's setup token as a secret of THIS repo -
+      #     one place for every engineer and every codebase, rather than the
+      #     same token re-uploaded to each codebase repo - and it is
+      #     named after their account email - uppercased, every
+      #     non-alphanumeric run folded to a single underscore, plus
+      #     _CLAUDE_CODE_OAUTH_TOKEN:
+      #
+      #       systems.ai@tildetech.ae -> SYSTEMS_AI_TILDETECH_AE_CLAUDE_CODE_OAUTH_TOKEN
+      #
+      #     The app derives that name with the same rule it used to create
+      #     the secret and passes it as the secret_name input, so this file
+      #     needs no per-engineer configuration: onboarding an engineer is
+      #     just them saving their token in the app. The fallback below
+      #     derives the name from account_name for a hand-started run that
+      #     supplies only the email.
+      #
+      #     `secrets` is indexed by that computed name. Two things this
+      #     deliberately does NOT do:
+      #       - No `toJSON(secrets)`. Serialising the whole secrets context
+      #         matches a known exfiltration signature, so GitHub can hold
+      #         the workflow for approval ("this workflow file may be
+      #         malicious"), and a JSON blob defeats log masking.
+      #       - No hardcoded roster of secret names, which silently locked
+      #         out any engineer nobody had remembered to add.
+      #
+      #     There is deliberately no fallback to a shared token: falling back
+      #     would silently run - and bill - as whoever owns that token rather
+      #     than the engineer who started the run.
+      - name: Resolve secret name
+        id: secret-name
+        env:
+          ACCOUNT_NAME: ${{ github.event.inputs.account_name }}
+          SECRET_NAME_INPUT: ${{ github.event.inputs.secret_name }}
+          CID: ${{ github.event.inputs.correlation_id }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ACCOUNT_NAME:-}" ]; then
+            echo "[cid:$CID] ERROR: no account_name supplied."
+            echo "[cid:$CID] Pass the email of the Claude account whose token this run should use."
+            exit 1
+          fi
+
+          SECRET_NAME="${SECRET_NAME_INPUT:-}"
+
+          if [ -z "$SECRET_NAME" ]; then
+            SECRET_NAME="$(printf '%s' "$ACCOUNT_NAME" \
+              | tr -d '[:space:]' \
+              | tr '[:lower:]' '[:upper:]' \
+              | sed -E 's/[^A-Z0-9]+/_/g; s/^_+//; s/_+$//')"
+            [ -n "$SECRET_NAME" ] && SECRET_NAME="${SECRET_NAME}_CLAUDE_CODE_OAUTH_TOKEN"
+          fi
+
+          # Guard the value before it indexes the secrets context.
+          if ! printf '%s' "$SECRET_NAME" | grep -qE '^[A-Z_][A-Z0-9_]*$'; then
+            echo "[cid:$CID] ERROR: account_name '$ACCOUNT_NAME' does not yield a valid"
+            echo "[cid:$CID] GitHub secret name (got '$SECRET_NAME')."
+            exit 1
+          fi
+
+          echo "[cid:$CID] Account '$ACCOUNT_NAME' -> secret '$SECRET_NAME'."
+          echo "name=$SECRET_NAME" >> "$GITHUB_OUTPUT"
+
+      # The secrets context is indexed by the resolved name, so only this
+      # engineer's token is ever read - no other secret is touched.
+      - name: Resolve Claude setup token
+        env:
+          TOKEN: ${{ secrets[steps.secret-name.outputs.name] }}
+          SECRET_NAME: ${{ steps.secret-name.outputs.name }}
+          ACCOUNT_NAME: ${{ github.event.inputs.account_name }}
+          CID: ${{ github.event.inputs.correlation_id }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TOKEN:-}" ]; then
+            echo "[cid:$CID] ERROR: no token available for account '$ACCOUNT_NAME'."
+            echo "[cid:$CID] Expected secret on ${{ github.repository }}: $SECRET_NAME"
+            echo "[cid:$CID]"
+            echo "[cid:$CID] Create it in the desktop app: set Account email to"
+            echo "[cid:$CID] '$ACCOUNT_NAME', enter that account's Claude setup token"
+            echo "[cid:$CID] and press Save. The app writes the secret under exactly"
+            echo "[cid:$CID] this name. No change to this workflow is needed."
+            exit 1
+          fi
+
+          echo "::add-mask::$TOKEN"
+          echo "CLAUDE_CODE_OAUTH_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "[cid:$CID] Setup token resolved from '$SECRET_NAME'."
+
+      # 7. Run Claude Code headlessly with the setup token.
+      #    -p runs in non-interactive "print" mode.
+      #    --dangerously-skip-permissions is needed so it can write files
+      #    without an interactive approval prompt in CI.
+      #    --model and --effort are caller-selectable (see workflow_dispatch
+      #    inputs above), so run-and-download.ps1 can switch them per run
+      #    instead of them being hardcoded here. Defaults to sonnet / medium.
+      #    --output-format stream-json --verbose emits one JSON event per
+      #    turn / tool call / reasoning step. That raw stream is captured as
+      #    claude-run.jsonl and is the source of truth used below to build a
+      #    detailed, human-readable log of how Claude analyzed and
+      #    implemented the requirements. claude-output.log keeps a plain-text
+      #    copy of the same stream as a quick fallback for debugging.
+      - name: Run Claude Code
+        env:
+          # CLAUDE_CODE_OAUTH_TOKEN is exported by "Resolve Claude setup token" above.
+          CID: ${{ github.event.inputs.correlation_id }}
+          MODEL: ${{ github.event.inputs.model }}
+          EFFORT: ${{ github.event.inputs.effort }}
+        run: |
+          echo "[cid:$CID] Running Claude Code with model='$MODEL' effort='$EFFORT'..."
+          cd codebase
+          set -o pipefail
+          claude -p "$(cat ../prompt.txt)" \
+            --model "$MODEL" \
+            --effort "$EFFORT" \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            2>&1 | tee ../claude-run.jsonl
+          # With pipefail set, $? is the pipeline's status - i.e. claude's
+          # failure is preserved rather than masked by tee succeeding.
+          STATUS=$?
+          echo "[cid:$CID] Claude Code finished with exit code $STATUS."
+          exit $STATUS
+
+      # 7b. Turn the raw JSON event stream into two things a human can read:
+      #     - claude-output.log:   plain text, same shape as the old text log
+      #     - claude-run-log.md:   a detailed Markdown report of how Claude
+      #                            approached and implemented the requirements
+      #                            (prompt used, each step/tool call taken,
+      #                            files touched, and the final result)
+      - name: Generate detailed run log
+        if: always()
+        env:
+          CID: ${{ github.event.inputs.correlation_id }}
+          MODEL: ${{ github.event.inputs.model }}
+          EFFORT: ${{ github.event.inputs.effort }}
+        run: |
+          echo "[cid:$CID] Generating detailed run log from claude-run.jsonl..."
+          node agent-tool/.github/workflows/scripts/generate-run-log.js
+
+      # 8. Collect everything the generator produced. Results land either in
+      #    an "out"-style folder (the documented suite-export destination) or
+      #    as loose md/csv files in the codebase.
+      - name: Collect outputs
+        if: always()
+        env:
+          CID: ${{ github.event.inputs.correlation_id }}
+        shell: bash
+        run: |
+          set +e   # never let a single copy failure abort collection
+          echo "[cid:$CID] ---- Files in codebase/ ----"
+          if [ -d "codebase" ]; then
+            find codebase -type f | sort
+          else
+            echo "[cid:$CID] Directory 'codebase' not found."
+          fi
+          DEST="$GITHUB_WORKSPACE/collected"
+          mkdir -p "$DEST"
+
+          # a) The tool's output folder, if it wrote to one. Note: these are
+          #    all *inside* codebase/, so they can never alias $DEST.
+          for d in codebase/out codebase/output codebase/outputs codebase/test-cases; do
+            if [ -d "$d" ]; then
+              echo "[cid:$CID] Found output folder: $d"
+              mkdir -p "$DEST/$(basename "$d")"
+              cp -r "$d/." "$DEST/$(basename "$d")/"
+            fi
+          done
+
+          # b) Any md/csv/json generated in the codebase that wasn't in the
+          #    original checkout.
+          cd codebase
+          git ls-files --others --exclude-standard \
+            | grep -v '^\.claude/' \
+            | grep -Ei '\.(md|csv|json)$' \
+            | grep -Ev '^(\.claude/skills/|test-cases-generator-demo-tools/|test-cases-generator-demo-docs/)' \
+            | while read -r f; do
+                echo "[cid:$CID] Found generated file: $f"
+                mkdir -p "$DEST/$(dirname "$f")"
+                cp "$f" "$DEST/$f"
+              done
+          cd ..
+
+          # c) Run logs: the detailed Markdown log of how Claude implemented
+          #    the requirements, the raw JSON event stream it was built from,
+          #    and the plain-text fallback log.
+          mkdir -p "$DEST/logs"
+          for f in claude-run-log.md claude-run.jsonl claude-output.log; do
+            if [ -f "$f" ]; then
+              cp "$f" "$DEST/logs/"
+            fi
+          done
+
+          # d) Report the skills that were installed and actually loaded by
+          #    Claude - to the LOG ONLY. These are inputs, not results, so
+          #    they are deliberately NOT copied into $DEST: the artifact
+          #    holds outputs and logs only. This prints from
+          #    codebase/.claude/skills (not agent-tool/) so it reflects the
+          #    exact copies Claude loaded.
+          echo "[cid:$CID] ---- Skills used in this run (not downloaded) ----"
+          if [ -d "codebase/.claude/skills" ]; then
+            echo "[cid:$CID] codebase:    ${{ github.event.inputs.target_repo }}@${{ github.event.inputs.target_ref }}"
+            echo "[cid:$CID] codebase commit: $(git -C codebase rev-parse HEAD 2>/dev/null || echo unknown)"
+            if [ -d "agent-tool/.git" ]; then
+              echo "[cid:$CID] tool repo:   AtefSaber-sheen/test-cases-generator-demo"
+              echo "[cid:$CID] tool commit: $(git -C agent-tool rev-parse HEAD 2>/dev/null || echo unknown)"
+            fi
+            for d in codebase/.claude/skills/*/; do
+              [ -d "$d" ] || continue
+              name="$(basename "$d")"
+              if [ -f "$d/SKILL.md" ]; then
+                echo "[cid:$CID]   [OK] $name ($(wc -c < "$d/SKILL.md" | tr -d ' ') bytes)"
+              else
+                echo "[cid:$CID]   [MISSING SKILL.md] $name"
+              fi
+            done
+          else
+            echo "[cid:$CID] WARNING: codebase/.claude/skills not found - skills were NOT installed."
+          fi
+
+          echo "[cid:$CID] ---- Collected files ----"
+          find "$DEST" -type f | sed "s|$DEST/||" | sort
+          echo "[cid:$CID] Total: $(find "$DEST" -type f | wc -l) file(s)"
+          exit 0
+
+      # 9. Upload results, tagged with the correlation id.
+      #    retention-days is per-artifact, so every run expires on its own
+      #    clock from its own upload time - an engineer dispatching today is
+      #    unaffected by one who dispatched last week. The desktop app
+      #    downloads the artifact as soon as the run finishes, so the default
+      #    of 1 day only has to outlive that download; GitHub then deletes
+      #    the artifact itself and nothing accumulates in the repo's storage.
+      - name: Upload test cases artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-test-cases-${{ github.event.inputs.correlation_id }}
+          path: collected/
+          if-no-files-found: error
+          retention-days: ${{ github.event.inputs.retention_days || '1' }}
+
+      - name: Log completion
+        if: always()
+        run: echo "[cid:${{ github.event.inputs.correlation_id }}] Workflow run finished with status ${{ job.status }}"
